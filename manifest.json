@@ -1,0 +1,10 @@
+{
+  "name": "Копейка",
+  "short_name": "Копейка",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#14151B",
+  "theme_color": "#14151B",
+  "lang": "ru",
+  "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}]
+}
