@@ -11,7 +11,7 @@
   try{
     const n=10;
     const parts=await Promise.all(
-      Array.from({length:n},(_,i)=>fetch('y'+i+'.b64?v=70',{cache:'no-store'}).then(r=>{
+      Array.from({length:n},(_,i)=>fetch('y'+i+'.b64?v=71',{cache:'no-store'}).then(r=>{
         if(!r.ok) throw new Error('y'+i);
         return r.text();
       }))
