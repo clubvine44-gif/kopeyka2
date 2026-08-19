@@ -1,1 +1,30 @@
-PLACEHOLDER
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#14151B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Копейка</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css?v=12">
+</head>
+<body>
+<header class="topbar">
+  <button class="brand" id="brandHome" type="button"><span class="dot"></span> Копейка</button>
+  <div class="topbar-notice" id="topNotice" hidden><span class="tn-text"></span></div>
+  <div class="top-actions">
+    <button type="button" class="icon-btn" id="btnTheme" title="Тема">◐</button>
+  </div>
+</header>
+<main id="main"></main>
+<button type="button" class="fab" id="fab" aria-label="Меню">+</button>
+<div class="nav-backdrop" id="navBackdrop"></div>
+<div class="nav-arc" id="navArc"></div>
+<div id="modalRoot"></div>
+<div id="toast" class="toast" hidden></div>
+<script src="app.js?v=12"></script>
+<script src="cloud.js?v=3"></script>
+</body>
+</html>
