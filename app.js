@@ -3,7 +3,7 @@
   try {
     const n = 13;
     const files = Array.from({length:n},(_,i)=>"c"+i+".b64");
-    const parts = await Promise.all(files.map(f => fetch(f+"?v=12",{cache:"no-store"}).then(r=>{
+    const parts = await Promise.all(files.map(f => fetch(f+"?v=14",{cache:"no-store"}).then(r=>{
       if(!r.ok) throw new Error("load "+f);
       return r.text();
     })));
