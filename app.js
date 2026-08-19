@@ -1,8 +1,8 @@
 (async function(){
   try{
-    const n=8;
+    const n=9;
     const parts=await Promise.all(
-      Array.from({length:n},(_,i)=>fetch('z'+i+'.b64?v=80',{cache:'no-store'}).then(r=>{
+      Array.from({length:n},(_,i)=>fetch('z'+i+'.b64?v=90',{cache:'no-store'}).then(r=>{
         if(!r.ok) throw new Error('z'+i+' '+r.status);
         return r.text();
       }))
