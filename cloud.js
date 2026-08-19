@@ -31,6 +31,12 @@ function toast(msg){
   else console.log('[cloud]', msg);
 }
 
+/* Короткое уведомление о синхронизации показываем в шапке, а не внизу экрана */
+function topNotice(msg){
+  if(typeof window.topNotice==='function') window.topNotice(msg);
+  else toast(msg);
+}
+
 function normalize(raw){
   if(!raw || typeof raw!=='object') raw={};
   const base = typeof window.defaultState==='function' ? window.defaultState() : {
@@ -66,7 +72,7 @@ function applyState(raw, source){
     if(typeof window.render==='function') window.render();
   }
   lastSent = JSON.stringify(n);
-  toast(source==='cloud' ? '\u0414\u0430\u043d\u043d\u044b\u0435 \u0438\u0437 \u043e\u0431\u043b\u0430\u043a\u0430 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u044b' : '\u041b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u043f\u043e\u0434\u0442\u044f\u043d\u0443\u0442\u044b');
+  topNotice(source==='cloud' ? '\u0414\u0430\u043d\u043d\u044b\u0435 \u0438\u0437 \u043e\u0431\u043b\u0430\u043a\u0430 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u044b' : '\u041b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u043f\u043e\u0434\u0442\u044f\u043d\u0443\u0442\u044b');
 }
 
 function localLegacy(){
