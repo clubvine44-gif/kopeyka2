@@ -359,3 +359,9 @@ window.kopeykaCloud={
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', bootCloud);
 else bootCloud();
 })();
+
+(function(){
+  var s=document.createElement('script');
+  s.src='fix-cash.js?v=1';
+  document.head.appendChild(s);
+})();
