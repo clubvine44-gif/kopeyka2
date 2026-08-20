@@ -1,10 +1,9 @@
-/* cloud.js — Supabase sync for Kopeyka 2 (same account as kopeyka1) */
+/* cloud.js v5 — Supabase for Kopeyka 2. Same account as kopeyka1. */
 (function(){
 'use strict';
 const URL='https://cqslrfphsjllhltsvvuq.supabase.co';
 const KEY='sb_publishable_cM_XCycYRFLIc6qEqlH83Q_5XY6kPzG';
 const LOCAL_KEY='kopeyka2_state_v2';
-const LEGACY_KEY='kopeyka_state_v1';
 
 let sb=null, ready=false, saving=false, lastSent='', currentUser=null;
 
@@ -13,7 +12,7 @@ function loadSDK(){
     if(window.supabase)return ok();
     const s=document.createElement('script');
     s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-    s.onload=ok; s.onerror=bad;
+    s.onload=ok; s.onerror=()=>bad(new Error('SDK'));
     document.head.appendChild(s);
   });
 }
@@ -30,11 +29,19 @@ function toast(msg){
   if(typeof window.toast==='function') window.toast(msg);
   else console.log('[cloud]', msg);
 }
-
-/* Короткое уведомление о синхронизации показываем в шапке, а не внизу экрана */
 function topNotice(msg){
   if(typeof window.topNotice==='function') window.topNotice(msg);
   else toast(msg);
+}
+
+function score(s){
+  if(!s||typeof s!=='object')return 0;
+  let n=0;
+  ['income','expenses','reserves','debts','reserveOps','notes','recurring'].forEach(k=>{
+    if(Array.isArray(s[k])) n+=s[k].length;
+  });
+  if(s.shiftsOverride) n+=Object.keys(s.shiftsOverride).length;
+  return n;
 }
 
 function normalize(raw){
@@ -45,21 +52,47 @@ function normalize(raw){
   };
   const out = Object.assign({}, base, raw);
   out.settings = Object.assign({}, base.settings||{}, raw.settings||{});
-  if(out.settings.shiftTypes){
+  if(base.settings && base.settings.shiftTypes){
     out.settings.shiftTypes = Object.assign(
-      {}, (base.settings&&base.settings.shiftTypes)||{}, out.settings.shiftTypes
+      {}, base.settings.shiftTypes, (raw.settings&&raw.settings.shiftTypes)||{}
     );
   }
   if(!out.settings.anchorDate && out.settings.cycleAnchor) out.settings.anchorDate = out.settings.cycleAnchor;
-  if(out.settings.anchorIndex==null && out.settings.anchorDate) out.settings.anchorIndex = 1;
-  if(!out.settings.cyclePattern || !out.settings.cyclePattern.length){
-    out.settings.cyclePattern = ['day','day','night','night','off','off'];
+  if(!Array.isArray(out.settings.cyclePattern) || !out.settings.cyclePattern.length){
+    out.settings.cyclePattern = (base.settings&&base.settings.cyclePattern) || ['day','day','night','night','off','off'];
   }
-  ['income','expenses','reserves','debts','recurring','reserveOps','notes'].forEach(k=>{
-    if(!Array.isArray(out[k])) out[k]=[];
-  });
   if(!out.shiftsOverride || typeof out.shiftsOverride!=='object') out.shiftsOverride={};
+  ['income','expenses','recurring','reserves','reserveOps','debts','notes'].forEach(k=>{
+    if(!Array.isArray(out[k])) out[k]=Array.isArray(base[k])?base[k].slice():[];
+  });
+  out.settings.currentBalance = Number(out.settings.currentBalance)||0;
+  (out.reserves||[]).forEach(r=>{
+    r.saved=Number(r.saved)||0;
+    r.target=Number(r.target)||0;
+    r.fixedAmount=Number(r.fixedAmount)||0;
+    r.percent=Number(r.percent)||0;
+    if(r.active==null) r.active=true;
+  });
+  (out.reserveOps||[]).forEach(o=>{ o.amount=Number(o.amount)||0; });
+  if(!out.updatedAt) out.updatedAt=new Date().toISOString();
   return out;
+}
+
+function mergeStates(a,b){
+  const A=normalize(a||{}), B=normalize(b||{});
+  const pick = score(A)>=score(B) ? A : B;
+  const other = pick===A ? B : A;
+  const out=JSON.parse(JSON.stringify(pick));
+  out.settings=Object.assign({}, other.settings||{}, pick.settings||{});
+  ['income','expenses','recurring','reserves','reserveOps','debts','notes'].forEach(k=>{
+    const m=new Map();
+    (other[k]||[]).forEach(x=>{ if(x&&x.id) m.set(x.id,x); });
+    (pick[k]||[]).forEach(x=>{ if(x&&x.id) m.set(x.id,x); });
+    out[k]=Array.from(m.values());
+  });
+  out.shiftsOverride=Object.assign({}, other.shiftsOverride||{}, pick.shiftsOverride||{});
+  out.updatedAt=new Date().toISOString();
+  return normalize(out);
 }
 
 function applyState(raw, source){
@@ -72,19 +105,15 @@ function applyState(raw, source){
     if(typeof window.render==='function') window.render();
   }
   lastSent = JSON.stringify(n);
-  topNotice(source==='cloud' ? '\u0414\u0430\u043d\u043d\u044b\u0435 \u0438\u0437 \u043e\u0431\u043b\u0430\u043a\u0430 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u044b' : '\u041b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u043f\u043e\u0434\u0442\u044f\u043d\u0443\u0442\u044b');
+  if(source==='cloud') topNotice('Данные из облака загружены');
+  else if(source==='merge') topNotice('Облако и локальные данные объединены');
 }
 
-function localLegacy(){
-  /* \u0410\u0432\u0442\u043e-\u0438\u043c\u043f\u043e\u0440\u0442 \u0438\u0437 LEGACY_KEY \u0443\u0431\u0440\u0430\u043d \u043d\u0430\u0432\u0441\u0435\u0433\u0434\u0430: \u041a\u043e\u043f\u0435\u0439\u043a\u0430-1 \u0438 \u041a\u043e\u043f\u0435\u0439\u043a\u0430-2 \u0436\u0438\u0432\u0443\u0442 \u043d\u0430 \u043e\u0434\u043d\u043e\u043c \u0434\u043e\u043c\u0435\u043d\u0435
-     (\u043e\u0431\u0449\u0438\u0439 localStorage), \u0438 LEGACY_KEY='kopeyka_state_v1' \u2014 \u044d\u0442\u043e \u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u044b\u0439 \u043a\u043b\u044e\u0447 \u041a\u043e\u043f\u0435\u0439\u043a\u0438-1.
-     \u0427\u0442\u0435\u043d\u0438\u0435 \u0435\u0433\u043e \u0437\u0434\u0435\u0441\u044c \u043f\u0440\u0438\u0432\u043e\u0434\u0438\u043b\u043e \u043a \u0442\u043e\u043c\u0443, \u0447\u0442\u043e \u0436\u0438\u0432\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u041a\u043e\u043f\u0435\u0439\u043a\u0438-1 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438
-     \u0437\u0430\u043b\u0438\u0432\u0430\u043b\u0438\u0441\u044c \u0432 \u043e\u0431\u043b\u0430\u043a\u043e \u041a\u043e\u043f\u0435\u0439\u043a\u0438-2. \u0421\u0432\u043e\u0439 \u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u044b\u0439 \u043a\u044d\u0448 (LOCAL_KEY) \u043e\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u043c. */
+function readLocal(){
   try{
-    const b = localStorage.getItem(LOCAL_KEY);
-    if(b) return JSON.parse(b);
-  }catch(_){}
-  return null;
+    const b=localStorage.getItem(LOCAL_KEY);
+    return b?JSON.parse(b):null;
+  }catch(_){ return null; }
 }
 
 async function loadFromCloud(){
@@ -98,58 +127,65 @@ async function loadFromCloud(){
       q = { data: t.data ? [{state:t.data.state}] : [] };
     }
     const row = Array.isArray(q.data) ? q.data[0] : q.data;
+    const local = readLocal() || (window.STATE ? window.STATE : null);
+
     if(row && row.state && typeof row.state==='object'){
-      applyState(row.state, 'cloud');
+      const merged = mergeStates(local, row.state);
+      applyState(merged, score(local)>0 && score(row.state)>0 ? 'merge' : 'cloud');
       ready=true;
+      saveToCloud(true).catch(()=>{});
+      setStatus(true, 'Синхронизировано');
       return true;
     }
-    const legacy = localLegacy();
-    if(legacy){
-      applyState(legacy, 'local');
-      ready=true;
-      await saveToCloud(true);
-      toast('\u0421\u0442\u0430\u0440\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u043f\u0435\u0440\u0435\u043d\u0435\u0441\u0435\u043d\u044b \u0432 \u043e\u0431\u043b\u0430\u043a\u043e');
-      return true;
-    }
+
     ready=true;
-    toast('\u041e\u0431\u043b\u0430\u043a\u043e \u043f\u0443\u0441\u0442\u043e\u0435');
-    return false;
+    if(local && score(local)>0){
+      const ok = await saveToCloud(true);
+      setStatus(ok, ok?'Синхронизировано':'Локально (запись не прошла)');
+      if(ok) topNotice('Локальные данные отправлены в облако');
+    } else {
+      setStatus(true, 'Облако подключено');
+    }
+    return true;
   }catch(e){
-    console.error(e);
-    toast('\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438 \u043e\u0431\u043b\u0430\u043a\u0430');
+    console.error('cloud load', e);
+    ready=false;
+    setStatus(false, 'Ошибка: '+(e.message||e.code||'сеть'));
+    topNotice('Облако недоступно — данные на устройстве');
     return false;
   }
 }
 
 async function saveToCloud(force){
-  if(!currentUser || !ready) return false;
+  if(!currentUser) { toast('Сначала войди в облако'); return false; }
   if(saving) return false;
   const st = window.STATE;
   if(!st) return false;
   saving=true;
   try{
     const clean = JSON.parse(JSON.stringify(normalize(st)));
+    clean.updatedAt = new Date().toISOString();
     const json = JSON.stringify(clean);
     if(!force && json===lastSent){ saving=false; return true; }
     const c=client();
-    let r = await c.rpc('save_user_finance_state', {p_state:clean, p_version:9});
+    let r = await c.rpc('save_user_finance_state', {p_state:clean, p_version:11});
     if(r.error){
       r = await c.from('user_finance_state').upsert({
         user_id: currentUser.id,
         state: clean,
-        version: 9,
+        version: 11,
         updated_at: new Date().toISOString()
       }, {onConflict:'user_id'});
-      if(r.error) throw new Error(r.error.message||'DB error');
+      if(r.error) throw new Error(r.error.message||r.error.code||'save failed');
     }
-    lastSent=json;
+    lastSent = json;
     try{ localStorage.setItem(LOCAL_KEY, json); }catch(_){}
-    setStatus(true, '\u0421\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u043d\u043e');
+    ready=true;
+    setStatus(true, 'Синхронизировано');
     return true;
   }catch(e){
-    console.error(e);
-    setStatus(false, '\u041e\u0448\u0438\u0431\u043a\u0430 \u0441\u0438\u043d\u043a\u0430');
-    toast('\u041e\u0431\u043b\u0430\u043a\u043e: \u043e\u0448\u0438\u0431\u043a\u0430');
+    console.error('cloud save', e);
+    setStatus(false, 'Не сохранилось: '+(e.message||'ошибка'));
     return false;
   }finally{
     saving=false;
@@ -158,9 +194,9 @@ async function saveToCloud(force){
 
 let saveTimer=null;
 function scheduleSave(){
-  if(!ready || !currentUser) return;
+  if(!currentUser) return;
   clearTimeout(saveTimer);
-  saveTimer=setTimeout(()=>saveToCloud(false), 900);
+  saveTimer=setTimeout(()=>saveToCloud(false), 1200);
 }
 
 function setStatus(ok, text){
@@ -181,14 +217,14 @@ function ensureAccountBtn(){
   wrap.id='cloudAccount';
   wrap.className='cloud-account';
   wrap.innerHTML=
-    '<button type="button" class="cloud-btn" id="cloudBtn" title="\u0410\u043a\u043a\u0430\u0443\u043d\u0442">'+
-    '<span id="cloudAvatar">?</span><span id="cloudDot" class="cloud-dot"></span></button>'+
+    '<button type="button" class="cloud-btn" id="cloudBtn" title="Облако и аккаунт" aria-label="Облако">'+
+    '<span id="cloudAvatar">☁</span><span id="cloudDot" class="cloud-dot"></span></button>'+
     '<div class="cloud-menu" id="cloudMenu" hidden>'+
-    '<div class="cloud-email" id="cloudEmail">\u041d\u0435 \u0432\u043e\u0448\u043b\u0438</div>'+
-    '<div class="cloud-status" id="cloudStatus">\u2014</div>'+
-    '<button type="button" class="btn btn-secondary" id="cloudSync">\u0421\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0438\u0440\u043e\u0432\u0430\u0442\u044c</button>'+
-    '<button type="button" class="btn btn-secondary" id="cloudLogin">\u0412\u043e\u0439\u0442\u0438 / \u0420\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u044f</button>'+
-    '<button type="button" class="btn btn-ghost" id="cloudLogout">\u0412\u044b\u0439\u0442\u0438</button>'+
+    '<div class="cloud-email" id="cloudEmail">Не вошли</div>'+
+    '<div class="cloud-status" id="cloudStatus">Нажми «Войти»</div>'+
+    '<button type="button" class="btn btn-primary" id="cloudLogin">Войти в облако</button>'+
+    '<button type="button" class="btn btn-secondary" id="cloudSync">Синхронизировать</button>'+
+    '<button type="button" class="btn btn-ghost" id="cloudLogout" style="display:none">Выйти</button>'+
     '</div>';
   top.appendChild(wrap);
   document.getElementById('cloudBtn').onclick=(e)=>{
@@ -201,13 +237,17 @@ function ensureAccountBtn(){
     if(m) m.hidden=true;
   });
   document.getElementById('cloudMenu').onclick=e=>e.stopPropagation();
-  document.getElementById('cloudSync').onclick=()=>saveToCloud(true).then(()=>toast('\u0421\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u044f \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0430'));
+  document.getElementById('cloudSync').onclick=async()=>{
+    if(!currentUser){ showAuth(); return; }
+    const ok=await saveToCloud(true);
+    toast(ok?'Синхронизация завершена':'Не удалось синхронизировать');
+  };
   document.getElementById('cloudLogin').onclick=()=>showAuth();
   document.getElementById('cloudLogout').onclick=async()=>{
     try{ await client().auth.signOut(); }catch(_){}
     currentUser=null; ready=false; lastSent='';
     updateAccountUI();
-    setStatus(false,'\u0412\u044b\u0448\u043b\u0438');
+    setStatus(false,'Вышли');
   };
 }
 
@@ -215,13 +255,14 @@ function updateAccountUI(){
   const email=currentUser&&currentUser.email;
   const av=document.getElementById('cloudAvatar');
   const em=document.getElementById('cloudEmail');
-  if(av) av.textContent=email?email[0].toUpperCase():'?';
-  if(em) em.textContent=email||'\u041d\u0435 \u0432\u043e\u0448\u043b\u0438';
+  if(av) av.textContent=email?email[0].toUpperCase():'☁';
+  if(em) em.textContent=email||'Не вошли';
   const login=document.getElementById('cloudLogin');
   const logout=document.getElementById('cloudLogout');
   if(login) login.style.display=email?'none':'block';
   if(logout) logout.style.display=email?'block':'none';
-  setStatus(!!email, email?'\u0412 \u0441\u0435\u0442\u0438':'\u041e\u0444\u043b\u0430\u0439\u043d');
+  if(email) setStatus(true, 'В сети');
+  else setStatus(false, 'Офлайн — нажми Войти');
 }
 
 function showAuth(){
@@ -231,36 +272,42 @@ function showAuth(){
   root.className='cloud-auth';
   root.innerHTML=
     '<div class="cloud-auth-card">'+
-    '<h2>\u041e\u0431\u043b\u0430\u043a\u043e \u041a\u043e\u043f\u0435\u0439\u043a\u0438</h2>'+
-    '<p class="faint">\u0422\u043e\u0442 \u0436\u0435 \u0430\u043a\u043a\u0430\u0443\u043d\u0442, \u0447\u0442\u043e \u0438 \u0432 \u041a\u043e\u043f\u0435\u0439\u043a\u0435-1. \u041f\u043e\u0441\u043b\u0435 \u0432\u0445\u043e\u0434\u0430 \u043f\u043e\u0434\u0442\u044f\u043d\u0443\u0442\u0441\u044f \u0434\u0430\u043d\u043d\u044b\u0435.</p>'+
-    '<div class="field modern"><label>Email</label><input id="cEmail" type="email" autocomplete="email"></div>'+
-    '<div class="field modern"><label>\u041f\u0430\u0440\u043e\u043b\u044c</label><input id="cPass" type="password" autocomplete="current-password"></div>'+
-    '<div class="cloud-auth-msg" id="cMsg"></div>'+
-    '<button class="btn btn-primary" id="cIn">\u0412\u043e\u0439\u0442\u0438</button>'+
-    '<button class="btn btn-secondary" style="margin-top:8px" id="cUp">\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u044f</button>'+
-    '<button class="btn btn-ghost" style="margin-top:8px" id="cX">\u0417\u0430\u043a\u0440\u044b\u0442\u044c</button>'+
-    '</div>';
+    '<button type="button" id="cloudAuthClose" style="position:absolute;right:14px;top:12px;background:none;border:0;font-size:22px;color:var(--dim);cursor:pointer">×</button>'+
+    '<h2>Облако Копейки</h2>'+
+    '<p class="faint">Тот же аккаунт, что и раньше. После входа данные подтянутся с сервера и синхронизируются.</p>'+
+    '<div class="cloud-auth-msg" id="cloudAuthMsg"></div>'+
+    '<input type="email" id="cloudEmailIn" placeholder="Email" autocomplete="username">'+
+    '<input type="password" id="cloudPassIn" placeholder="Пароль" autocomplete="current-password">'+
+    '<div style="display:flex;gap:8px;margin-top:12px">'+
+    '<button type="button" class="btn btn-secondary" id="cloudSignup">Создать</button>'+
+    '<button type="button" class="btn btn-primary" id="cloudSignin">Войти</button>'+
+    '</div></div>';
+  root.querySelector('.cloud-auth-card').style.position='relative';
   document.body.appendChild(root);
-  const msg=t=>{ document.getElementById('cMsg').textContent=t||''; };
-  document.getElementById('cX').onclick=()=>root.remove();
+  document.getElementById('cloudAuthClose').onclick=()=>root.remove();
+  root.addEventListener('click',e=>{ if(e.target===root) root.remove(); });
+
   async function doAuth(signup){
-    const email=document.getElementById('cEmail').value.trim();
-    const password=document.getElementById('cPass').value;
-    if(!email||password.length<6){ msg('Email \u0438 \u043f\u0430\u0440\u043e\u043b\u044c (\u043e\u0442 6 \u0441\u0438\u043c\u0432\u043e\u043b\u043e\u0432)'); return; }
-    msg(signup?'\u0421\u043e\u0437\u0434\u0430\u044e\u2026':'\u0412\u0445\u043e\u0436\u0443\u2026');
+    const email=document.getElementById('cloudEmailIn').value.trim();
+    const password=document.getElementById('cloudPassIn').value;
+    const msg=document.getElementById('cloudAuthMsg');
+    if(!email||password.length<6){ msg.textContent='Email и пароль (мин. 6 символов)'; return; }
+    msg.textContent=signup?'Создаю…':'Вход…';
     try{
       const c=client();
       const r=signup
         ? await c.auth.signUp({email,password})
         : await c.auth.signInWithPassword({email,password});
       if(r.error) throw r.error;
-      if(signup && !r.data.session){ msg('\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438 email, \u043f\u043e\u0442\u043e\u043c \u0432\u043e\u0439\u0434\u0438'); return; }
-      await onSession(r.data.session);
+      if(signup && !r.data.session){ msg.textContent='Подтверди email, потом войди'; return; }
       root.remove();
-    }catch(e){ msg(e.message||'\u041e\u0448\u0438\u0431\u043a\u0430'); }
+      await onSession(r.data.session);
+    }catch(e){
+      msg.textContent=e.message||'Ошибка входа';
+    }
   }
-  document.getElementById('cIn').onclick=()=>doAuth(false);
-  document.getElementById('cUp').onclick=()=>doAuth(true);
+  document.getElementById('cloudSignin').onclick=()=>doAuth(false);
+  document.getElementById('cloudSignup').onclick=()=>doAuth(true);
 }
 
 async function onSession(session){
@@ -269,7 +316,7 @@ async function onSession(session){
   }
   currentUser=session.user;
   updateAccountUI();
-  setStatus(true,'\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430\u2026');
+  setStatus(true,'Загрузка…');
   await loadFromCloud();
   updateAccountUI();
 }
@@ -298,7 +345,8 @@ async function bootCloud(){
     c.auth.onAuthStateChange((_e, session)=>onSession(session));
   }catch(e){
     console.error('cloud boot', e);
-    toast('\u041e\u0431\u043b\u0430\u043a\u043e \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e');
+    ensureAccountBtn();
+    setStatus(false,'Облако недоступно');
   }
 }
 
